@@ -47,6 +47,16 @@ export function buildRateLimitConfig(options: {
 }
 
 /**
+ * Result of validating flag combinations
+ */
+interface FlagValidationResult {
+  /** Whether the validation passed */
+  valid: boolean;
+  /** Error message if validation failed */
+  error?: string;
+}
+
+/**
  * Validates that rate-limit flags are not used without --enable-api-proxy.
  */
 export function validateRateLimitFlags(enableApiProxy: boolean, options: {
@@ -78,13 +88,13 @@ export function validateEnableOpenCodeFlag(enableApiProxy: boolean, enableOpenCo
 }
 
 /**
- * Result of validating flag combinations
+ * Validates that --enable-token-steering is not used without --enable-api-proxy.
  */
-interface FlagValidationResult {
-  /** Whether the validation passed */
-  valid: boolean;
-  /** Error message if validation failed */
-  error?: string;
+export function validateEnableTokenSteeringFlag(enableApiProxy: boolean, enableTokenSteering: boolean): FlagValidationResult {
+  if (enableTokenSteering && !enableApiProxy) {
+    return { valid: false, error: '--enable-token-steering requires --enable-api-proxy' };
+  }
+  return { valid: true };
 }
 
 /**

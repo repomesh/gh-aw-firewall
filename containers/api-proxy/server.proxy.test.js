@@ -608,6 +608,7 @@ describe('token steering — getAndClearPendingSteeringMessage and injectSteerin
 
   beforeEach(() => {
     process.env.AWF_MAX_EFFECTIVE_TOKENS = '100';
+    process.env.AWF_ENABLE_TOKEN_STEERING = 'true';
     delete process.env.AWF_EFFECTIVE_TOKEN_MODEL_MULTIPLIERS;
     reset();
     resetEffectiveTokenGuardForTests();
@@ -615,6 +616,7 @@ describe('token steering — getAndClearPendingSteeringMessage and injectSteerin
 
   afterEach(() => {
     delete process.env.AWF_MAX_EFFECTIVE_TOKENS;
+    delete process.env.AWF_ENABLE_TOKEN_STEERING;
     delete process.env.AWF_EFFECTIVE_TOKEN_MODEL_MULTIPLIERS;
     reset();
     resetEffectiveTokenGuardForTests();
@@ -625,7 +627,7 @@ describe('token steering — getAndClearPendingSteeringMessage and injectSteerin
     expect(getAndClearPendingSteeringMessage()).toBeNull();
   });
 
-  it('injects 50% warning into an OpenAI request body and clears it on the next request', () => {
+  it('injects 80% warning into an OpenAI request body and clears it on the next request', () => {
     // Two upstream request objects — one per proxyRequest call.
     let responseHandler;
     const upstreamReq1 = new EventEmitter();
@@ -648,7 +650,7 @@ describe('token steering — getAndClearPendingSteeringMessage and injectSteerin
       .mockImplementationOnce(() => upstreamReq2)
       .mockImplementationOnce(() => upstreamReq3);
 
-    // Request 1: triggers 56 effective tokens (14 output × 4.0) → 56% of 100 → crosses 50%
+    // Request 1: triggers 84 effective tokens (21 output × 4.0) → 84% of 100 → crosses 80%
     const req1 = new EventEmitter();
     req1.url = '/v1/chat/completions';
     req1.method = 'POST';
@@ -666,11 +668,11 @@ describe('token steering — getAndClearPendingSteeringMessage and injectSteerin
 
     proxyRes.emit('data', Buffer.from(JSON.stringify({
       model: 'gpt-4o',
-      usage: { prompt_tokens: 0, completion_tokens: 14 },
+      usage: { prompt_tokens: 0, completion_tokens: 21 },
     })));
     proxyRes.emit('end');
 
-    // Request 2: the proxy should inject the 50% warning into the outgoing body.
+    // Request 2: the proxy should inject the 80% warning into the outgoing body.
     // We send a minimal OpenAI chat body and inspect what the proxy writes upstream.
     const req2Body = Buffer.from(JSON.stringify({
       messages: [{ role: 'user', content: 'Hello' }],
@@ -690,12 +692,12 @@ describe('token steering — getAndClearPendingSteeringMessage and injectSteerin
     const writtenBody2 = JSON.parse(upstreamReq2.write.mock.calls[0][0].toString());
     // A system message with the budget warning should be prepended.
     expect(writtenBody2.messages[0].role).toBe('system');
-    expect(writtenBody2.messages[0].content).toContain('[AWF WARNING]');
-    expect(writtenBody2.messages[0].content).toContain('50%');
+    expect(writtenBody2.messages[0].content).toContain('[AWF TOKEN WARNING]');
+    expect(writtenBody2.messages[0].content).toContain('80%');
     // The original user message should follow.
     expect(writtenBody2.messages[1]).toMatchObject({ role: 'user', content: 'Hello' });
 
-    // Request 3: the 50% threshold has already been injected; no further steering.
+    // Request 3: the 80% threshold has already been injected; no further steering.
     const req3Body = Buffer.from(JSON.stringify({
       messages: [{ role: 'user', content: 'Hello again' }],
     }));
@@ -711,12 +713,80 @@ describe('token steering — getAndClearPendingSteeringMessage and injectSteerin
 
     expect(upstreamReq3.write).toHaveBeenCalledTimes(1);
     const writtenBody3 = JSON.parse(upstreamReq3.write.mock.calls[0][0].toString());
-    const systemMessages3 = writtenBody3.messages.filter(m => m.role === 'system' && m.content.includes('[AWF WARNING]'));
+    const systemMessages3 = writtenBody3.messages.filter(m => m.role === 'system' && m.content.includes('[AWF TOKEN WARNING]'));
     expect(systemMessages3).toHaveLength(0);
   });
 
+  it('does not inject any warning when AWF_ENABLE_TOKEN_STEERING is not set', () => {
+    // Disable token steering for this test
+    delete process.env.AWF_ENABLE_TOKEN_STEERING;
+
+    // Load a fresh proxyRequest that shares the same proxy-request module instance
+    // as reset() and getAndClearPendingSteeringMessage (assigned in beforeAll above).
+    // This prevents accumulated effective-token state from earlier tests (which use a
+    // different proxy-request instance loaded before jest.resetModules() was called by
+    // the CONNECT-tunnel describe's afterAll) from leaking into this test.
+    const { proxyRequest: localProxyRequest } = require('./server');
+
+    let responseHandler;
+    const upstreamReq1 = new EventEmitter();
+    upstreamReq1.end = jest.fn();
+    upstreamReq1.write = jest.fn();
+    upstreamReq1.destroy = jest.fn();
+
+    const upstreamReq2 = new EventEmitter();
+    upstreamReq2.end = jest.fn();
+    upstreamReq2.write = jest.fn();
+    upstreamReq2.destroy = jest.fn();
+
+    jest.spyOn(https, 'request')
+      .mockImplementationOnce((_opts, cb) => { responseHandler = cb; return upstreamReq1; })
+      .mockImplementationOnce(() => upstreamReq2);
+
+    // Request 1: triggers 84 effective tokens (21 output × 4.0) → 84% of 100 → would cross 80% if steering enabled
+    const req1 = new EventEmitter();
+    req1.url = '/v1/chat/completions';
+    req1.method = 'POST';
+    req1.headers = { 'content-type': 'application/json' };
+    const res1 = { headersSent: false, setHeader: jest.fn(), writeHead: jest.fn(), end: jest.fn() };
+
+    localProxyRequest(req1, res1, 'api.openai.com', { Authorization: 'Bearer token' }, 'openai');
+    req1.emit('end');
+
+    const proxyRes = new EventEmitter();
+    proxyRes.statusCode = 200;
+    proxyRes.headers = { 'content-type': 'application/json' };
+    proxyRes.pipe = jest.fn();
+    responseHandler(proxyRes);
+
+    proxyRes.emit('data', Buffer.from(JSON.stringify({
+      model: 'gpt-4o',
+      usage: { prompt_tokens: 0, completion_tokens: 21 },
+    })));
+    proxyRes.emit('end');
+
+    // Request 2: steering is disabled, so no warning should be injected.
+    const req2Body = Buffer.from(JSON.stringify({
+      messages: [{ role: 'user', content: 'Hello' }],
+    }));
+    const req2 = new EventEmitter();
+    req2.url = '/v1/chat/completions';
+    req2.method = 'POST';
+    req2.headers = { 'content-type': 'application/json', 'content-length': String(req2Body.length) };
+    const res2 = { headersSent: false, setHeader: jest.fn(), writeHead: jest.fn(), end: jest.fn() };
+
+    localProxyRequest(req2, res2, 'api.openai.com', { Authorization: 'Bearer token' }, 'openai');
+    req2.emit('data', req2Body);
+    req2.emit('end');
+
+    expect(upstreamReq2.write).toHaveBeenCalledTimes(1);
+    const writtenBody2 = JSON.parse(upstreamReq2.write.mock.calls[0][0].toString());
+    const systemMessages = writtenBody2.messages.filter(m => m.role === 'system' && m.content.includes('[AWF TOKEN WARNING]'));
+    expect(systemMessages).toHaveLength(0);
+  });
+
   describe('injectSteeringMessage', () => {
-    const WARNING = '[AWF WARNING] Test warning message.';
+    const WARNING = '[AWF TOKEN WARNING] Test warning message.';
 
     it('injects into OpenAI messages array after existing system messages', () => {
       const body = Buffer.from(JSON.stringify({

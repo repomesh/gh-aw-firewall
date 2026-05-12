@@ -33,6 +33,7 @@ import {
   buildRateLimitConfig,
   validateRateLimitFlags,
   validateEnableOpenCodeFlag,
+  validateEnableTokenSteeringFlag,
   validateSkipPullWithBuildLocal,
   validateAllowHostPorts,
   applyHostServicePortsConfig,
@@ -335,6 +336,7 @@ export function createMainAction(getOptionValueSource: OptionSourceResolver) {
     maxEffectiveTokens,
     effectiveTokenModelMultipliers,
     maxRuns,
+    enableTokenSteering: options.enableTokenSteering as boolean,
     openaiApiKey: process.env.OPENAI_API_KEY,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     copilotGithubToken: process.env.COPILOT_GITHUB_TOKEN,
@@ -396,6 +398,13 @@ export function createMainAction(getOptionValueSource: OptionSourceResolver) {
   const enableOpenCodeValidation = validateEnableOpenCodeFlag(config.enableApiProxy ?? false, config.enableOpenCode ?? false);
   if (!enableOpenCodeValidation.valid) {
     logger.error(enableOpenCodeValidation.error!);
+    process.exit(1);
+  }
+
+  // Error if --enable-token-steering is used without --enable-api-proxy
+  const enableTokenSteeringValidation = validateEnableTokenSteeringFlag(config.enableApiProxy ?? false, config.enableTokenSteering ?? false);
+  if (!enableTokenSteeringValidation.valid) {
+    logger.error(enableTokenSteeringValidation.error!);
     process.exit(1);
   }
 
