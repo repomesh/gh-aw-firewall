@@ -6,6 +6,23 @@ import * as logDiscovery from '../logs/log-discovery';
 import * as logAggregator from '../logs/log-aggregator';
 import * as statsFormatter from '../logs/stats-formatter';
 import { LogSource } from '../types';
+import { AggregatedStats } from '../logs/log-aggregator';
+
+export const EMPTY_STATS: AggregatedStats = {
+  totalRequests: 0,
+  allowedRequests: 0,
+  deniedRequests: 0,
+  uniqueDomains: 0,
+  byDomain: new Map(),
+  timeRange: null,
+};
+
+function createEmptyStats(): AggregatedStats {
+  return {
+    ...EMPTY_STATS,
+    byDomain: new Map(),
+  };
+}
 
 /**
  * Creates typed mock references and registers shared beforeEach/afterEach
@@ -42,6 +59,15 @@ export function createLogCommandTestHarness() {
   });
 
   return harness;
+}
+
+export type LogCommandTestHarness = ReturnType<typeof createLogCommandTestHarness>;
+
+export function setupEmptyStatsHarness(harness: LogCommandTestHarness, source: LogSource): void {
+  harness.mockedDiscovery.discoverLogSources.mockResolvedValue([source]);
+  harness.mockedDiscovery.selectMostRecent.mockReturnValue(source);
+  harness.mockedAggregator.loadAndAggregate.mockImplementation(async () => createEmptyStats());
+  harness.mockedFormatter.formatStats.mockReturnValue('');
 }
 
 /**
