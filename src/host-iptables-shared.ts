@@ -17,10 +17,14 @@ let ipv6DisabledViaSysctl = false;
 /**
  * Resets internal IPv6 state (for testing only).
  */
-export function _resetIpv6State(): void {
+function resetIpv6State(): void {
   ip6tablesAvailableCache = null;
   ipv6DisabledViaSysctl = false;
 }
+
+/** @internal Test-only helpers */
+// ts-prune-ignore-next
+export const _testing = { resetIpv6State };
 
 /**
  * Gets the bridge interface name for the firewall network
