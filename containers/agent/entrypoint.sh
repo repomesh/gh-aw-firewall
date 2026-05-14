@@ -737,15 +737,33 @@ AWFEOF
 # Set comprehensive PATH for host binaries
 # Include standard paths plus tool cache locations (GitHub Actions)
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# Prepend entries from $GITHUB_PATH file (written by setup-* actions) so they
+# take priority over the hostedtoolcache scan below.  This replicates what the
+# Actions runner normally does with GITHUB_PATH, preserving the version chosen
+# by setup-ruby / setup-python / setup-node / etc.
+if [ -n "${GITHUB_PATH}" ] && [ -f "${GITHUB_PATH}" ]; then
+  _github_path_prefix=""
+  while IFS= read -r _gp_entry; do
+    _gp_entry="${_gp_entry%$'\r'}"  # strip trailing CR (Windows-style CRLF files)
+    [ -z "${_gp_entry}" ] && continue
+    _github_path_prefix="${_github_path_prefix}${_gp_entry}:"
+  done < "${GITHUB_PATH}"
+  [ -n "${_github_path_prefix}" ] && export PATH="${_github_path_prefix}${PATH}"
+fi
 # Dynamically scan /opt/hostedtoolcache for all installed tool bin directories
 # This covers tools installed by any setup-* action (setup-ruby, setup-dart,
 # setup-python, setup-node, setup-go, setup-java, etc.)
+# Append (not prepend) so that $GITHUB_PATH entries and standard paths above
+# retain priority; discovered toolcache dirs serve as fallbacks only.
 if [ -d "/opt/hostedtoolcache" ]; then
   for tool_dir in /opt/hostedtoolcache/*/; do
     for version_dir in "$tool_dir"*/; do
       for arch_dir in "$version_dir"*/; do
         if [ -d "${arch_dir}bin" ]; then
-          export PATH="${arch_dir}bin:$PATH"
+          case ":${PATH}:" in
+            *":${arch_dir}bin:"*) ;;
+            *) export PATH="${PATH}:${arch_dir}bin" ;;
+          esac
         fi
       done
     done
