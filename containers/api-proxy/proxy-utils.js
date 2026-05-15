@@ -234,6 +234,7 @@ function createBaseAdapterConfig(env, { keyEnvVar, targetEnvVar, basePathEnvVar,
  * @param {() => boolean} [opts.skipModelsFetch]
  * @param {Record<string,string>|(() => Record<string,string>)} [opts.modelsFetchHeaders]
  * @param {string|null} [opts.modelsCacheKey]
+ * @param {boolean} [opts.participatesInValidation]
  * @param {boolean} [opts.reflectionConfigured]
  * @param {string|null} [opts.reflectionModelsPath]
  * @param {Record<string, unknown>|(() => Record<string, unknown>)} [opts.reflectionExtra]
@@ -241,6 +242,9 @@ function createBaseAdapterConfig(env, { keyEnvVar, targetEnvVar, basePathEnvVar,
  * @param {() => ({ url: string, opts: object, cacheKey: string }|null)} [opts.getModelsFetchConfig]
  * @param {() => object} [opts.getReflectionInfo]
  * @returns {{
+ *   getTargetHost: (req?: import('http').IncomingMessage) => string,
+ *   getBasePath: (req?: import('http').IncomingMessage) => string,
+ *   participatesInValidation: boolean,
  *   getValidationProbe: () => ({ url: string, opts: object }|{ skip: true, reason: string }|null),
  *   getModelsFetchConfig: () => ({ url: string, opts: object, cacheKey: string }|null),
  *   getReflectionInfo: () => object
@@ -263,6 +267,7 @@ function createAdapterMethods(opts) {
     skipModelsFetch,
     modelsFetchHeaders = validationHeaders,
     modelsCacheKey = provider,
+    participatesInValidation = !!apiKey,
     reflectionConfigured = !!apiKey,
     reflectionModelsPath = modelsPath,
     reflectionExtra = {},
@@ -316,6 +321,9 @@ function createAdapterMethods(opts) {
   }));
 
   return {
+    getTargetHost() { return rawTarget; },
+    getBasePath() { return basePath; },
+    participatesInValidation,
     getValidationProbe: builtValidationProbe,
     getModelsFetchConfig: builtModelsFetchConfig,
     getReflectionInfo: builtReflectionInfo,
