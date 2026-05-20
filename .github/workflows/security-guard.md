@@ -11,7 +11,8 @@ permissions:
   issues: read
 engine:
   id: claude
-  max-turns: 6
+  model: claude-sonnet-4-5
+  max-turns: 3
 tools:
   github:
     mode: gh-proxy
@@ -122,7 +123,7 @@ Analyze PR #${{ github.event.pull_request.number }} in repository ${{ github.rep
 
 ## Security Checks
 
-Check for: ACCEPT expansion, DROP/REJECT weakening, firewall chain changes, DNS/IPv6 bypasses, Squid ACL regressions, extra egress ports, wildcard bypasses, capability additions (`SYS_ADMIN`, `NET_RAW`), seccomp relaxation, hardening removal, injection risk, and hardcoded secrets.
+Check: ACCEPT and DROP/REJECT weakening, firewall chain changes, Squid ACL regressions, capability additions (SYS_ADMIN/NET_RAW), seccomp relaxations, egress expansion, DNS/wildcard bypass, input validation weakening, secrets.
 
 ## Output Format
 
