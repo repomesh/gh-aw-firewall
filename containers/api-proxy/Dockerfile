@@ -26,6 +26,7 @@ COPY server.js logging.js metrics.js rate-limiter.js \
      otel.js ./
 COPY guards/ ./guards/
 COPY providers/ ./providers/
+COPY transforms/ ./transforms/
 
 # Create non-root user
 RUN addgroup -S apiproxy && adduser -S apiproxy -G apiproxy
