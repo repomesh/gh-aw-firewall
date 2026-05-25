@@ -865,8 +865,8 @@ specified by `apiProxy.logging.tokenLogDir` (default: `/var/log/api-proxy`):
 
 | Event | Description |
 |-------|-------------|
-| `MODEL_ALIAS_RESOLUTION_STEP` | Each step in the alias resolution chain (input → pattern match → candidate) |
-| `MODEL_ALIAS_REWRITE` | Final rewrite decision with before/after model names and matched pattern |
+| `model_alias_resolution_step` | Each step in the alias resolution chain (input → pattern match → candidate) |
+| `model_alias_rewrite` | Final rewrite decision with before/after model names and matched pattern |
 
 Each diagnostic record follows the `token-diag/v<version>` schema:
 
@@ -874,7 +874,7 @@ Each diagnostic record follows the `token-diag/v<version>` schema:
 {
   "_schema": "token-diag/v0.25.40",
   "timestamp": "2025-01-15T10:30:00.000Z",
-  "event": "MODEL_ALIAS_RESOLUTION_STEP",
+  "event": "model_alias_resolution_step",
   "data": {
     "alias": "sonnet",
     "pattern": "anthropic/*sonnet*",
@@ -904,6 +904,12 @@ apiProxy:
 
 AWF produces the following structured and unstructured log files at runtime.
 All JSONL files use the `.jsonl` extension.
+
+All AWF JSONL records **MUST** include the following top-level fields:
+
+- `timestamp` (string, required): ISO 8601 UTC with milliseconds (`YYYY-MM-DDTHH:mm:ss.SSSZ`).
+- `event` (string, required): Stable snake_case record discriminator.
+- `_schema` (string, required): Schema identifier in the form `<record-type>/v<version>`.
 
 #### Squid Proxy Logs
 
@@ -963,9 +969,9 @@ a corresponding JSON Schema in the `schemas/` directory:
 |--------|------------|-------------|
 | [`schemas/audit.schema.json`](../schemas/audit.schema.json) | `audit.jsonl` | L7 HTTP/HTTPS traffic decisions (allowed/denied) from the Squid proxy |
 | [`schemas/token-usage.schema.json`](../schemas/token-usage.schema.json) | `token-usage.jsonl` | Per-API-call token usage records from the api-proxy sidecar |
+| [`schemas/otel-span.schema.json`](../schemas/otel-span.schema.json) | `otel.jsonl` | OpenTelemetry span records emitted by the local file exporter |
+| [`schemas/cli-proxy-access.schema.json`](../schemas/cli-proxy-access.schema.json) | `access.jsonl` (cli-proxy) | CLI proxy request audit records |
 | *(inline, see §13.2)* | `token-diag.jsonl` | Model alias resolution steps and diagnostic events (opt-in via `apiProxy.logging.debugTokens`) |
-| *(no schema)* | `otel.jsonl` | OpenTelemetry span records (local fallback when no collector configured) |
-| *(no schema)* | `access.jsonl` (cli-proxy) | CLI proxy request audit records |
 
 ### Versioning
 
@@ -985,6 +991,8 @@ tag serves as the version:
 https://github.com/github/gh-aw-firewall/releases/download/<tag>/awf-config.schema.json
 https://github.com/github/gh-aw-firewall/releases/download/<tag>/audit.schema.json
 https://github.com/github/gh-aw-firewall/releases/download/<tag>/token-usage.schema.json
+https://github.com/github/gh-aw-firewall/releases/download/<tag>/otel-span.schema.json
+https://github.com/github/gh-aw-firewall/releases/download/<tag>/cli-proxy-access.schema.json
 ```
 
 **Latest (main branch):**
@@ -992,6 +1000,8 @@ https://github.com/github/gh-aw-firewall/releases/download/<tag>/token-usage.sch
 https://raw.githubusercontent.com/github/gh-aw-firewall/main/docs/awf-config.schema.json
 https://raw.githubusercontent.com/github/gh-aw-firewall/main/schemas/audit.schema.json
 https://raw.githubusercontent.com/github/gh-aw-firewall/main/schemas/token-usage.schema.json
+https://raw.githubusercontent.com/github/gh-aw-firewall/main/schemas/otel-span.schema.json
+https://raw.githubusercontent.com/github/gh-aw-firewall/main/schemas/cli-proxy-access.schema.json
 ```
 
 ## Informative References

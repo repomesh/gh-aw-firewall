@@ -116,6 +116,7 @@ function validateTokenUsageRecord(record) {
   const required = [
     ['_schema', 'string'],
     ['timestamp', 'string'],
+    ['event', 'string'],
     ['request_id', 'string'],
     ['provider', 'string'],
     ['model', 'string'],
@@ -152,6 +153,16 @@ function validateTokenUsageRecord(record) {
     return false;
   }
 
+  if (record.event !== 'token_usage') {
+    logRequest('warn', 'token_record_schema_violation', {
+      request_id: record.request_id,
+      field: 'event',
+      expected: 'token_usage',
+      actual: record.event,
+    });
+    return false;
+  }
+
   return true;
 }
 
@@ -175,6 +186,7 @@ function buildTokenUsageRecord(normalized, opts) {
   return {
     _schema: TOKEN_USAGE_SCHEMA,
     timestamp: new Date().toISOString(),
+    event: 'token_usage',
     request_id: requestId,
     provider,
     model: model || 'unknown',
