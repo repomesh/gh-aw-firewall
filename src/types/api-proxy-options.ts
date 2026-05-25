@@ -303,6 +303,39 @@ export interface ApiProxyOptions {
   modelAliases?: Record<string, string[]>;
 
   /**
+   * Enable detailed token and model-alias diagnostic logging.
+   *
+   * When true, the API proxy writes diagnostic events to `token-diag.jsonl`
+   * including:
+   * - `MODEL_ALIAS_RESOLUTION_STEP` — each step of the alias resolution chain
+   * - `MODEL_ALIAS_REWRITE` — final alias rewrite decision
+   * - Token usage summaries and per-request diagnostics
+   *
+   * The `token-diag.jsonl` file is written alongside the `token-usage.jsonl`
+   * in the directory specified by `tokenLogDir`.
+   *
+   * Set via:
+   * - Config file: `apiProxy.logging.debugTokens: true`
+   * - Environment variable: `AWF_DEBUG_TOKENS=1`
+   *
+   * @default false
+   */
+  debugTokens?: boolean;
+
+  /**
+   * Directory path for API proxy log files (`token-usage.jsonl` and
+   * `token-diag.jsonl`). In the default AWF compose, this must be `/var/log/api-proxy`
+   * (or a subdirectory) so logs are written to the mounted volume.
+   *
+   * Set via:
+   * - Config file: `apiProxy.logging.tokenLogDir: "/var/log/api-proxy/custom"`
+   * - Environment variable: `AWF_TOKEN_LOG_DIR=/var/log/api-proxy/custom`
+   *
+   * @default "/var/log/api-proxy"
+   */
+  tokenLogDir?: string;
+
+  /**
    * Enable Anthropic prompt-cache optimizations in the API proxy sidecar.
    *
    * When true, the Anthropic proxy (port 10001) automatically mutates every
