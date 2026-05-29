@@ -50,6 +50,16 @@ function createOpenAIAdapter(env, deps = {}) {
     basePathEnvVar: 'OPENAI_API_BASE_PATH',
     defaultTarget: 'api.openai.com',
   });
+  const customAuthHeader = (() => {
+    const header = (env.AWF_OPENAI_AUTH_HEADER || '').trim();
+    if (!header) return '';
+    try {
+      require('http').validateHeaderName(header);
+    } catch {
+      throw new Error('Invalid AWF_OPENAI_AUTH_HEADER value: expected a valid HTTP header name');
+    }
+    return header;
+  })();
   const providerType = (env.COPILOT_PROVIDER_TYPE || '').trim().toLowerCase();
   const copilotAzureByokEnabled = providerType === 'azure';
   const copilotByokApiKey = (env.COPILOT_PROVIDER_API_KEY || '').trim() || undefined;
@@ -122,6 +132,18 @@ function createOpenAIAdapter(env, deps = {}) {
       }
     }
   }
+  /**
+   * Build a static-key auth header object.
+   * When AWF_OPENAI_AUTH_HEADER is set, uses that header name with the raw key.
+   * Otherwise uses the standard `Authorization: Bearer <key>` format.
+   */
+  function buildStaticAuthHeaders(key) {
+    if (customAuthHeader) {
+      return { [customAuthHeader]: key };
+    }
+    return { 'Authorization': `Bearer ${key}` };
+  }
+
   const oidcConfigured = !!(oidcProvider || awsOidcProvider);
   const adapterMethods = createAdapterMethods({
     apiKey,
@@ -131,13 +153,13 @@ function createOpenAIAdapter(env, deps = {}) {
     port: 10000,
     defaultTarget: 'api.openai.com',
     validationPath: '/v1/models',
-    validationHeaders: () => ({ 'Authorization': `Bearer ${apiKey}` }),
+    validationHeaders: () => buildStaticAuthHeaders(apiKey),
     validationSkip: () => (oidcConfigured
       ? { skip: true, reason: 'OIDC auth; validation via token acquisition' }
       : null),
     skipModelsFetch: () => oidcConfigured, // Models fetched after OIDC init
     modelsPath: '/v1/models',
-    modelsFetchHeaders: () => ({ 'Authorization': `Bearer ${apiKey}` }),
+    modelsFetchHeaders: () => buildStaticAuthHeaders(apiKey),
     reflectionConfigured: !!apiKey || oidcConfigured,
     reflectionModelsPath: '/v1/models',
     reflectionExtra: () => ({
@@ -179,7 +201,9 @@ function createOpenAIAdapter(env, deps = {}) {
       if (oidcProvider) {
         const token = oidcProvider.getToken();
         if (token) {
-          return { 'Authorization': `Bearer ${token}` };
+          return customAuthHeader
+            ? { [customAuthHeader]: token }
+            : { 'Authorization': `Bearer ${token}` };
         }
         return {};
       }
@@ -188,7 +212,7 @@ function createOpenAIAdapter(env, deps = {}) {
       if (awsOidcProvider) {
         return {};
       }
-      return { 'Authorization': `Bearer ${apiKey}` };
+      return buildStaticAuthHeaders(apiKey);
     },
 
     getBodyTransform() { return bodyTransform; },
