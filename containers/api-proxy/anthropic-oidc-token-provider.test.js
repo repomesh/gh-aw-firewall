@@ -26,6 +26,15 @@ function createMockServer(handlers = {}) {
   }, handlers);
 }
 
+/** Minimal valid config for tests that don't exercise the exchange step */
+const BASE_CONFIG = {
+  requestUrl: 'http://localhost:0/token',
+  requestToken: 'test',
+  federationRuleId: 'fdrl_test',
+  organizationId: 'org-uuid-test',
+  serviceAccountId: 'svac_test',
+};
+
 describe('AnthropicOidcTokenProvider', () => {
   let mockServer;
   let serverPort;
@@ -46,6 +55,9 @@ describe('AnthropicOidcTokenProvider', () => {
     const provider = new AnthropicOidcTokenProvider({
       requestUrl: `http://127.0.0.1:${serverPort}/token`,
       requestToken: 'mock-request-token',
+      federationRuleId: 'fdrl_abc123',
+      organizationId: 'org-uuid-abc',
+      serviceAccountId: 'svac_abc123',
     });
 
     provider._exchangeForAnthropicToken = async (jwt) => {
@@ -54,6 +66,9 @@ describe('AnthropicOidcTokenProvider', () => {
         JSON.stringify({
           grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
           assertion: jwt,
+          federation_rule_id: 'fdrl_abc123',
+          organization_id: 'org-uuid-abc',
+          service_account_id: 'svac_abc123',
         }),
         {
           'Content-Type': 'application/json',
@@ -70,6 +85,94 @@ describe('AnthropicOidcTokenProvider', () => {
     expect(provider.getToken()).toBe('sk-ant-oat01-mock-token');
 
     provider.shutdown();
+  });
+
+  it('should include required WIF fields in the exchange request body', async () => {
+    const provider = new AnthropicOidcTokenProvider({
+      requestUrl: 'http://127.0.0.1/token',
+      requestToken: 'mock-token',
+      federationRuleId: 'fdrl_myrule',
+      organizationId: 'org-00000000-0000-0000-0000-000000000001',
+      serviceAccountId: 'svac_myaccount',
+      workspaceId: 'wrkspc_myworkspace',
+    });
+
+    // Spy on the instance _httpPost to capture what the real _exchangeForAnthropicToken sends
+    const mockHttpPost = jest.spyOn(provider, '_httpPost').mockResolvedValue({
+      statusCode: 200,
+      body: JSON.stringify({ access_token: 'sk-ant-oat01-wif-token', expires_in: 3600 }),
+    });
+
+    try {
+      await provider._exchangeForAnthropicToken('fake-github-jwt');
+
+      expect(mockHttpPost).toHaveBeenCalledTimes(1);
+      const [url, rawBody] = mockHttpPost.mock.calls[0];
+      const sent = JSON.parse(rawBody);
+      expect(url).toBe('https://api.anthropic.com/v1/oauth/token');
+      expect(sent.grant_type).toBe('urn:ietf:params:oauth:grant-type:jwt-bearer');
+      expect(sent.assertion).toBe('fake-github-jwt');
+      expect(sent.federation_rule_id).toBe('fdrl_myrule');
+      expect(sent.organization_id).toBe('org-00000000-0000-0000-0000-000000000001');
+      expect(sent.service_account_id).toBe('svac_myaccount');
+      expect(sent.workspace_id).toBe('wrkspc_myworkspace');
+    } finally {
+      provider.shutdown();
+    }
+  });
+
+  it('should omit workspace_id from the exchange request when not provided', async () => {
+    const provider = new AnthropicOidcTokenProvider({
+      requestUrl: 'http://127.0.0.1/token',
+      requestToken: 'test',
+      federationRuleId: 'fdrl_norule',
+      organizationId: 'org-uuid',
+      serviceAccountId: 'svac_nows',
+    });
+
+    // Verify the real exchange body does not contain workspace_id
+    const mockHttpPost = jest.spyOn(provider, '_httpPost').mockResolvedValue({
+      statusCode: 200,
+      body: JSON.stringify({ access_token: 'sk-ant-oat01-mock', expires_in: 3600 }),
+    });
+
+    await provider._exchangeForAnthropicToken('fake-jwt');
+
+    const [, rawBody] = mockHttpPost.mock.calls[0];
+    const sent = JSON.parse(rawBody);
+    expect(sent.workspace_id).toBeUndefined();
+
+    provider.shutdown();
+  });
+
+  it('should include workspace_id in exchange body only when provided', async () => {
+    const withWs = new AnthropicOidcTokenProvider({
+      ...BASE_CONFIG,
+      workspaceId: 'wrkspc_abc',
+    });
+    const withoutWs = new AnthropicOidcTokenProvider(BASE_CONFIG);
+    const withEmptyWs = new AnthropicOidcTokenProvider({
+      ...BASE_CONFIG,
+      workspaceId: '  ',
+    });
+
+    expect(withWs._workspaceId).toBe('wrkspc_abc');
+    expect(withoutWs._workspaceId).toBeUndefined();
+    // empty / whitespace-only workspaceId must be normalized to undefined
+    expect(withEmptyWs._workspaceId).toBeUndefined();
+
+    withWs.shutdown();
+    withoutWs.shutdown();
+    withEmptyWs.shutdown();
+  });
+
+  it('should throw when required WIF fields are missing', () => {
+    expect(() => new AnthropicOidcTokenProvider({ ...BASE_CONFIG, federationRuleId: '' }))
+      .toThrow(/federationRuleId/);
+    expect(() => new AnthropicOidcTokenProvider({ ...BASE_CONFIG, organizationId: '' }))
+      .toThrow(/organizationId/);
+    expect(() => new AnthropicOidcTokenProvider({ ...BASE_CONFIG, serviceAccountId: '' }))
+      .toThrow(/serviceAccountId/);
   });
 
   it('should request GitHub OIDC token with the Anthropic audience by default', async () => {
@@ -89,6 +192,9 @@ describe('AnthropicOidcTokenProvider', () => {
       provider = new AnthropicOidcTokenProvider({
         requestUrl: `http://127.0.0.1:${oidcPort}/token`,
         requestToken: 'custom-request-token',
+        federationRuleId: 'fdrl_test',
+        organizationId: 'org-uuid-test',
+        serviceAccountId: 'svac_test',
       });
 
       provider._exchangeForAnthropicToken = jest.fn().mockResolvedValue({
@@ -108,10 +214,7 @@ describe('AnthropicOidcTokenProvider', () => {
   });
 
   it('should return null when not initialized', () => {
-    const provider = new AnthropicOidcTokenProvider({
-      requestUrl: 'http://localhost:0/token',
-      requestToken: 'test',
-    });
+    const provider = new AnthropicOidcTokenProvider(BASE_CONFIG);
 
     expect(provider.isReady()).toBe(false);
     expect(provider.getToken()).toBeNull();
@@ -130,6 +233,9 @@ describe('AnthropicOidcTokenProvider', () => {
     const provider = new AnthropicOidcTokenProvider({
       requestUrl: `http://127.0.0.1:${failPort}/token`,
       requestToken: 'bad-token',
+      federationRuleId: 'fdrl_test',
+      organizationId: 'org-uuid-test',
+      serviceAccountId: 'svac_test',
       retryDelayMs: 10,
       maxInitRetries: 2,
     });
@@ -144,10 +250,7 @@ describe('AnthropicOidcTokenProvider', () => {
   });
 
   it('should use https://api.anthropic.com as default audience', () => {
-    const provider = new AnthropicOidcTokenProvider({
-      requestUrl: 'http://localhost/token',
-      requestToken: 'test',
-    });
+    const provider = new AnthropicOidcTokenProvider(BASE_CONFIG);
 
     expect(provider._oidcAudience).toBe('https://api.anthropic.com');
     provider.shutdown();

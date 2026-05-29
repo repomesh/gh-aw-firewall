@@ -9,8 +9,11 @@ const {
  * @typedef {Object} AnthropicOidcTokenProviderConfig
  * @property {string} requestUrl - ACTIONS_ID_TOKEN_REQUEST_URL
  * @property {string} requestToken - ACTIONS_ID_TOKEN_REQUEST_TOKEN
+ * @property {string} federationRuleId - Anthropic federation rule ID (e.g. fdrl_...)
+ * @property {string} organizationId - Anthropic organization UUID
+ * @property {string} serviceAccountId - Anthropic service account ID (e.g. svac_...)
+ * @property {string} [workspaceId] - Anthropic workspace ID (required when the federation rule covers multiple workspaces)
  * @property {string} [oidcAudience] - Audience for GitHub OIDC token (default: https://api.anthropic.com)
- * @property {string} [scope] - Optional OAuth scope
  * @property {number} [retryDelayMs] - Retry delay after failed refresh (default: 30000)
  * @property {number} [maxInitRetries] - Maximum retries for initial token acquisition (default: 3)
  */
@@ -21,13 +24,32 @@ class AnthropicOidcTokenProvider extends BaseOidcTokenProvider {
    */
   constructor(config) {
     super('anthropic_oidc', config);
+
+    if (!config.federationRuleId) {
+      throw new Error('AnthropicOidcTokenProvider requires federationRuleId');
+    }
+    if (!config.organizationId) {
+      throw new Error('AnthropicOidcTokenProvider requires organizationId');
+    }
+    if (!config.serviceAccountId) {
+      throw new Error('AnthropicOidcTokenProvider requires serviceAccountId');
+    }
+
     this._requestUrl = config.requestUrl;
     this._requestToken = config.requestToken;
+    this._federationRuleId = config.federationRuleId;
+    this._organizationId = config.organizationId;
+    this._serviceAccountId = config.serviceAccountId;
+    // Normalize empty strings to undefined so workspace_id is never sent as ""
+    const ws = config.workspaceId != null ? config.workspaceId.trim() : undefined;
+    this._workspaceId = ws || undefined;
     this._oidcAudience = config.oidcAudience || 'https://api.anthropic.com';
-    this._scope = config.scope;
 
     /** @type {string|null} */
     this._cachedToken = null;
+
+    // Stored as instance method so tests can spy/stub without module-level mocking
+    this._httpPost = httpPost;
   }
 
   /**
@@ -36,13 +58,20 @@ class AnthropicOidcTokenProvider extends BaseOidcTokenProvider {
    * @returns {Promise<{access_token: string, expires_in: number}>}
    */
   async _exchangeForAnthropicToken(oidcJwt) {
-    const response = await httpPost(
+    const body = {
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: oidcJwt,
+      federation_rule_id: this._federationRuleId,
+      organization_id: this._organizationId,
+      service_account_id: this._serviceAccountId,
+    };
+    if (this._workspaceId !== undefined) {
+      body.workspace_id = this._workspaceId;
+    }
+
+    const response = await this._httpPost(
       'https://api.anthropic.com/v1/oauth/token',
-      JSON.stringify({
-        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-        assertion: oidcJwt,
-        ...(this._scope !== undefined ? { scope: this._scope } : {}),
-      }),
+      JSON.stringify(body),
       {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
@@ -91,6 +120,9 @@ class AnthropicOidcTokenProvider extends BaseOidcTokenProvider {
   _getInitSuccessLogContext() {
     return {
       audience: this._oidcAudience,
+      federation_rule_id: this._federationRuleId,
+      organization_id: this._organizationId,
+      service_account_id: this._serviceAccountId,
       expires_in_secs: this._expiresAt - Math.floor(Date.now() / 1000),
     };
   }
@@ -98,6 +130,9 @@ class AnthropicOidcTokenProvider extends BaseOidcTokenProvider {
   _getInitFailureLogContext() {
     return {
       audience: this._oidcAudience,
+      federation_rule_id: this._federationRuleId,
+      organization_id: this._organizationId,
+      service_account_id: this._serviceAccountId,
     };
   }
 }
