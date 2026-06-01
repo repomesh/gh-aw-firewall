@@ -16,7 +16,7 @@ name: Smoke Claude
 engine:
   id: claude
   model: claude-haiku-4-5
-  max-turns: 10
+  max-turns: 5
 sandbox:
   mcp:
     version: v0.3.1
@@ -79,30 +79,13 @@ steps:
       EXPR_GITHUB_RUN_ID: ${{ github.run_id }}
       EXPR_b14517fc: ${{ github.event.pull_request.number || '' }}
     run: |
-      cat > /tmp/gh-aw/agent/workflow-context.env << 'ENVEOF'
+      cat > /tmp/gh-aw/agent/workflow-context.env << ENVEOF
       export GITHUB_EVENT_NAME="$EXPR_GITHUB_EVENT_NAME"
       export GITHUB_RUN_ID="$EXPR_GITHUB_RUN_ID"
       export PR_NUMBER="$EXPR_b14517fc"
       ENVEOF
       echo "Context exported to /tmp/gh-aw/agent/workflow-context.env"
 post-steps:
-  - name: Show final Claude Code config
-    if: always()
-    run: |
-      echo "=== Final Claude Code Config ==="
-      if [ -f ~/.claude.json ]; then
-        echo "File: ~/.claude.json"
-        cat ~/.claude.json
-      else
-        echo "~/.claude.json not found"
-      fi
-      if [ -f ~/.claude/config.json ]; then
-        echo ""
-        echo "File: ~/.claude/config.json (legacy)"
-        cat ~/.claude/config.json
-      else
-        echo "~/.claude/config.json not found"
-      fi
   - name: Validate safe outputs were invoked
     run: |
       OUTPUTS_FILE="${GH_AW_SAFE_OUTPUTS:-${RUNNER_TEMP}/gh-aw/safeoutputs/outputs.jsonl}"
@@ -123,7 +106,7 @@ post-steps:
     if: always()
     run: |
       TURN_COUNT="${GH_AW_TURN_COUNT:-unknown}"
-      echo "::notice::Smoke test completed in ${TURN_COUNT} turns (target: 1)"
+      echo "::notice::Smoke test completed in ${TURN_COUNT} turns (target: 1, hard cap: 2)"
 ---
 
 # Smoke Test: Claude Engine Validation
@@ -135,7 +118,7 @@ Pre-computed data is available:
 - **Workflow context**: Source `/tmp/gh-aw/agent/workflow-context.env` for trigger/run variables
 
 **CRITICAL — Single Response Execution:**
-This workflow MUST complete in exactly 1 LLM turn (your first response).
+This workflow should complete in exactly 1 LLM turn (your first response); `max-turns: 5` is a hard cap for safety.
 All required data exists in pre-created files. There is nothing to explore, investigate, or validate beyond reading the 3 files listed below.
 
 Steps:
