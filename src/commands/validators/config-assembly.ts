@@ -115,6 +115,25 @@ export function assembleAndValidateConfig(
     logger.error('   Example: --docker-host-path-prefix /host');
     process.exit(1);
   }
+  if (config.chrootBinariesSourcePath && !config.chrootBinariesSourcePath.startsWith('/')) {
+    logger.error(
+      `❌ chroot.binariesSourcePath must be an absolute path, got: ${config.chrootBinariesSourcePath}`,
+    );
+    logger.error('   Example (stdin config): {"chroot":{"binariesSourcePath":"/tmp/gh-aw/runner-bin"}}');
+    process.exit(1);
+  }
+  if (config.chrootBinariesSourcePath === '/') {
+    logger.error('❌ chroot.binariesSourcePath cannot be "/"');
+    logger.error('   Provide a specific binaries directory, for example /tmp/gh-aw/runner-bin');
+    process.exit(1);
+  }
+  if (config.chrootBinariesSourcePath && /[:\n\r]/.test(config.chrootBinariesSourcePath)) {
+    logger.error(
+      `❌ chroot.binariesSourcePath must not contain ":" or newline characters, got: ${config.chrootBinariesSourcePath}`,
+    );
+    logger.error('   Example (stdin config): {"chroot":{"binariesSourcePath":"/tmp/gh-aw/runner-bin"}}');
+    process.exit(1);
+  }
 
   // Parse and validate --agent-timeout
   applyAgentTimeout(options.agentTimeout as string | undefined, config, logger);

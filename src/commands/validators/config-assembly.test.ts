@@ -251,6 +251,83 @@ describe('config-assembly', () => {
       expect(result).toBeDefined();
       expect(mockExit).not.toHaveBeenCalled();
     });
+
+    it('should reject relative chroot binaries source path', () => {
+      mockBuildConfigOnce({
+        awfDockerHost: undefined,
+        dockerHostPathPrefix: undefined,
+        chrootBinariesSourcePath: 'relative/path',
+      });
+
+      expect(() => {
+        callAssembleWith();
+      }).toThrow('process.exit(1)');
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('chroot.binariesSourcePath must be an absolute path'),
+      );
+    });
+
+    it('should accept absolute chroot binaries source path', () => {
+      mockBuildConfigOnce({
+        awfDockerHost: undefined,
+        dockerHostPathPrefix: undefined,
+        chrootBinariesSourcePath: '/tmp/gh-aw/runner-bin',
+      });
+
+      const result = callAssembleWith();
+
+      expect(result).toBeDefined();
+      expect(mockExit).not.toHaveBeenCalled();
+    });
+
+    it('should reject chroot binaries source path set to root', () => {
+      mockBuildConfigOnce({
+        awfDockerHost: undefined,
+        dockerHostPathPrefix: undefined,
+        chrootBinariesSourcePath: '/',
+      });
+
+      expect(() => {
+        callAssembleWith();
+      }).toThrow('process.exit(1)');
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('chroot.binariesSourcePath cannot be "/"'),
+      );
+    });
+
+    it('should reject chroot binaries source path containing a colon', () => {
+      mockBuildConfigOnce({
+        awfDockerHost: undefined,
+        dockerHostPathPrefix: undefined,
+        chrootBinariesSourcePath: '/tmp/bin:/extra',
+      });
+
+      expect(() => {
+        callAssembleWith();
+      }).toThrow('process.exit(1)');
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('chroot.binariesSourcePath must not contain ":" or newline characters'),
+      );
+    });
+
+    it('should reject chroot binaries source path containing a newline', () => {
+      mockBuildConfigOnce({
+        awfDockerHost: undefined,
+        dockerHostPathPrefix: undefined,
+        chrootBinariesSourcePath: '/tmp/bin\n/extra',
+      });
+
+      expect(() => {
+        callAssembleWith();
+      }).toThrow('process.exit(1)');
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('chroot.binariesSourcePath must not contain ":" or newline characters'),
+      );
+    });
   });
 
   describe('rate limit validation', () => {
