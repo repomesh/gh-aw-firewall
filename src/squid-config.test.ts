@@ -413,6 +413,22 @@ describe('generatePolicyManifest', () => {
       expect(allowPos).toBeLessThan(denyIpv4Pos);
     });
 
+    it('should insert from_api_proxy src rule before domain denyRule', () => {
+      const config: SquidConfig = {
+        domains: ['example.com'],
+        port: defaultPort,
+        apiProxyIp,
+        apiProxyPorts,
+      };
+      const result = generateSquidConfig(config);
+      expect(result).toContain(`acl from_api_proxy src ${apiProxyIp}/32`);
+      expect(result).toContain('http_access allow from_api_proxy');
+      // from_api_proxy allow rule must fire before the domain denyRule
+      const fromApiProxyPos = result.indexOf('http_access allow from_api_proxy');
+      const denyRulePos = result.indexOf('http_access deny !allowed_domains');
+      expect(fromApiProxyPos).toBeLessThan(denyRulePos);
+    });
+
     it('should not emit api-proxy rules when apiProxyIp is not set', () => {
       const config: SquidConfig = {
         domains: ['example.com'],
@@ -420,6 +436,7 @@ describe('generatePolicyManifest', () => {
       };
       const result = generateSquidConfig(config);
       expect(result).not.toContain('allow_api_proxy_ip');
+      expect(result).not.toContain('from_api_proxy');
     });
 
     it('should reject non-integer apiProxyPorts values', () => {
@@ -516,5 +533,36 @@ describe('generatePolicyManifest - Api-Proxy Rules', () => {
 
     const apiProxyRule = manifest.rules.find(r => r.id === 'allow-api-proxy-ip');
     expect(apiProxyRule).toBeUndefined();
+  });
+
+  it('should include allow-from-api-proxy rule when apiProxyIp is set', () => {
+    const manifest = generatePolicyManifest({
+      domains: ['example.com'],
+      port: defaultPort,
+      apiProxyIp: '172.30.0.30',
+    });
+
+    const fromProxyRule = manifest.rules.find(r => r.id === 'allow-from-api-proxy');
+    expect(fromProxyRule).toBeDefined();
+    expect(fromProxyRule!.action).toBe('allow');
+    expect(fromProxyRule!.aclName).toBe('from_api_proxy');
+    expect(fromProxyRule!.domains).toContain('*');
+    expect(fromProxyRule!.description).toContain('unrestricted outbound from api-proxy');
+
+    // Must come after allow-api-proxy-ip and before deny-raw-ipv4
+    const apiProxyRule = manifest.rules.find(r => r.id === 'allow-api-proxy-ip');
+    const denyIpv4Rule = manifest.rules.find(r => r.id === 'deny-raw-ipv4');
+    expect(fromProxyRule!.order).toBeGreaterThan(apiProxyRule!.order);
+    expect(fromProxyRule!.order).toBeLessThan(denyIpv4Rule!.order);
+  });
+
+  it('should not include allow-from-api-proxy rule when apiProxyIp is not set', () => {
+    const manifest = generatePolicyManifest({
+      domains: ['example.com'],
+      port: defaultPort,
+    });
+
+    const fromProxyRule = manifest.rules.find(r => r.id === 'allow-from-api-proxy');
+    expect(fromProxyRule).toBeUndefined();
   });
 });
