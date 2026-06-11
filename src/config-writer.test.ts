@@ -14,6 +14,9 @@ jest.mock('fs', () => {
   const actual = jest.requireActual<typeof import('fs')>('fs');
   return {
     ...actual,
+    chmodSync: jest.fn((...args: Parameters<typeof actual.chmodSync>) =>
+      actual.chmodSync(...args)
+    ),
     chownSync: jest.fn(),
     existsSync: jest.fn((...args: Parameters<typeof actual.existsSync>) =>
       actual.existsSync(...args)
@@ -232,6 +235,51 @@ describe('writeConfigs', () => {
       );
 
       expect(fs.existsSync(geminiDir)).toBe(true);
+    });
+
+    it('creates configured runner tool cache directory segments with correct ownership', async () => {
+      const runnerToolCacheParent = path.join(tempDir, 'runner-work');
+      const runnerToolCachePath = path.join(runnerToolCacheParent, '_tool');
+      expect(fs.existsSync(runnerToolCachePath)).toBe(false);
+
+      await writeConfigs(
+        buildWriteConfig({
+          runnerToolCachePath,
+        })
+      );
+
+      expect(fs.existsSync(runnerToolCachePath)).toBe(true);
+      expect(fs.statSync(runnerToolCachePath).isDirectory()).toBe(true);
+      expect(fs.chownSync).toHaveBeenCalledWith(runnerToolCacheParent, 1000, 1000);
+      expect(fs.chmodSync).toHaveBeenCalledWith(runnerToolCacheParent, 0o755);
+      expect(fs.chownSync).toHaveBeenCalledWith(runnerToolCachePath, 1000, 1000);
+      expect(fs.chmodSync).toHaveBeenCalledWith(runnerToolCachePath, 0o755);
+    });
+
+    it('prepares chroot mountpoint for fallback runner tool cache under home', async () => {
+      const runnerToolCachePath = path.join(tempDir, 'work', '_tool');
+      fs.mkdirSync(runnerToolCachePath, { recursive: true });
+
+      // Unset RUNNER_TOOL_CACHE so resolveRunnerToolCachePath falls through to the
+      // home-relative fallback (work/_tool). Restore after the test.
+      const savedRunnerToolCache = process.env.RUNNER_TOOL_CACHE;
+      delete process.env.RUNNER_TOOL_CACHE;
+      try {
+        await writeConfigs(buildWriteConfig());
+      } finally {
+        if (savedRunnerToolCache !== undefined) {
+          process.env.RUNNER_TOOL_CACHE = savedRunnerToolCache;
+        }
+      }
+
+      const chrootWorkDir = path.join(`${tempDir}-chroot-home`, 'work');
+      const chrootToolCacheDir = path.join(chrootWorkDir, '_tool');
+      expect(fs.existsSync(chrootToolCacheDir)).toBe(true);
+      expect(fs.statSync(chrootToolCacheDir).isDirectory()).toBe(true);
+      expect(fs.chownSync).toHaveBeenCalledWith(chrootWorkDir, 1000, 1000);
+      expect(fs.chmodSync).toHaveBeenCalledWith(chrootWorkDir, 0o755);
+      expect(fs.chownSync).toHaveBeenCalledWith(chrootToolCacheDir, 1000, 1000);
+      expect(fs.chmodSync).toHaveBeenCalledWith(chrootToolCacheDir, 0o755);
     });
 
     it('does not create .gemini directory when geminiApiKey is not provided', async () => {
