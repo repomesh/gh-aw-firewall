@@ -74,7 +74,16 @@ function createMissingOwnedDirectorySegments(dirPath: string, uid: number, gid: 
       created = true;
     }
 
-    assertRealDirectory(currentPath);
+    // Validate the current segment is a directory. Allow root-owned system symlinks
+    // (e.g. /var on macOS) but refuse user-controlled symlinks.
+    const lstat = fs.lstatSync(currentPath);
+    if (lstat.isSymbolicLink() && (created || lstat.uid !== 0)) {
+      throw new Error(`Refusing to use symlink as directory: ${currentPath}`);
+    }
+    const stat = fs.statSync(currentPath);
+    if (!stat.isDirectory()) {
+      throw new Error(`Expected directory but found non-directory path: ${currentPath}`);
+    }
 
     if (created) {
       fs.chownSync(currentPath, uid, gid);
