@@ -32,6 +32,8 @@
  * @param {Function} deps.getRetiredModelBlockState
  * @param {Function} deps.buildRetiredModelError
  * @param {Function} deps.checkUnknownModelRejection
+ * @param {Function} deps.getModelPolicyBlockState
+ * @param {Function} deps.buildModelPolicyError
  * @param {string|null} model - Model name extracted from the request, or null
  *   to skip model-specific guards.
  * @returns {Array<object>} Array of guard descriptor objects.
@@ -51,6 +53,8 @@ function buildCommonGuardChecks(deps, model) {
     getRetiredModelBlockState,
     buildRetiredModelError,
     checkUnknownModelRejection,
+    getModelPolicyBlockState,
+    buildModelPolicyError,
   } = deps;
 
   return [
@@ -122,6 +126,17 @@ function buildCommonGuardChecks(deps, model) {
         buildLogFields: block => ({
           model: block.model,
           suggestion: block.suggestion,
+        }),
+      },
+      {
+        block: getModelPolicyBlockState(model),
+        isBlocked: block => !!block,
+        statusCode: 403,
+        eventName: 'model_policy_violation',
+        buildError: buildModelPolicyError,
+        buildLogFields: block => ({
+          model: block.model,
+          reason: block.reason,
         }),
       },
       {
