@@ -233,51 +233,45 @@ describe('logs-audit command', () => {
       return entries;
     }
 
-    it('should filter by rule ID', async () => {
+    type AuditJsonEntry = {
+      timestamp: number;
+      domain: string;
+      method: string;
+      status: number;
+      decision: 'allowed' | 'denied';
+      matchedRule: string | undefined;
+      matchReason: string | undefined;
+      url: string;
+    };
+
+    async function runAuditFilter(options: Omit<AuditCommandOptions, 'format'>): Promise<AuditJsonEntry[]> {
       setupMocksWithMultipleEntries();
-
-      const options: AuditCommandOptions = { format: 'json', rule: 'deny-default' };
-      await auditCommand(options);
-
+      await auditCommand({ format: 'json', ...options });
       const output = mockConsoleLog.mock.calls[0][0] as string;
-      const parsed = JSON.parse(output);
+      return JSON.parse(output) as AuditJsonEntry[];
+    }
+
+    it('should filter by rule ID', async () => {
+      const parsed = await runAuditFilter({ rule: 'deny-default' });
       expect(parsed).toHaveLength(1);
       expect(parsed[0].domain).toBe('evil.com');
     });
 
     it('should filter by domain (case-insensitive substring)', async () => {
-      setupMocksWithMultipleEntries();
-
-      const options: AuditCommandOptions = { format: 'json', domain: 'api.github' };
-      await auditCommand(options);
-
-      const output = mockConsoleLog.mock.calls[0][0] as string;
-      const parsed = JSON.parse(output);
+      const parsed = await runAuditFilter({ domain: 'api.github' });
       expect(parsed).toHaveLength(1);
       expect(parsed[0].domain).toBe('api.github.com');
     });
 
     it('should filter by decision=allowed', async () => {
-      setupMocksWithMultipleEntries();
-
-      const options: AuditCommandOptions = { format: 'json', decision: 'allowed' };
-      await auditCommand(options);
-
-      const output = mockConsoleLog.mock.calls[0][0] as string;
-      const parsed = JSON.parse(output);
-      expect(parsed.every((e: any) => e.decision === 'allowed')).toBe(true);
+      const parsed = await runAuditFilter({ decision: 'allowed' });
+      expect(parsed.every(e => e.decision === 'allowed')).toBe(true);
       expect(parsed).toHaveLength(2);
     });
 
     it('should filter by decision=denied', async () => {
-      setupMocksWithMultipleEntries();
-
-      const options: AuditCommandOptions = { format: 'json', decision: 'denied' };
-      await auditCommand(options);
-
-      const output = mockConsoleLog.mock.calls[0][0] as string;
-      const parsed = JSON.parse(output);
-      expect(parsed.every((e: any) => e.decision === 'denied')).toBe(true);
+      const parsed = await runAuditFilter({ decision: 'denied' });
+      expect(parsed.every(e => e.decision === 'denied')).toBe(true);
       expect(parsed).toHaveLength(1);
     });
 
