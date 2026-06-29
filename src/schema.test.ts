@@ -12,7 +12,8 @@ describe('awf-config.schema.json', () => {
   beforeAll(() => {
     const raw = fs.readFileSync(schemaPath, 'utf8');
     schema = JSON.parse(raw) as Record<string, unknown>;
-    const ajv = new Ajv2020();
+    const ajv = new Ajv2020({ allErrors: true });
+    ajv.addKeyword({ keyword: 'version' });
     validate = ajv.compile(schema);
   });
 
