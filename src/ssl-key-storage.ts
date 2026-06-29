@@ -77,8 +77,9 @@ export async function unmountSslTmpfs(sslDir: string): Promise<void> {
  * cannot be guaranteed on all filesystems (for example, journaling/COW).
  *
  * @param filePath - Path to the file to securely wipe
+ * @internal Exported for testing
  */
-function secureWipeFile(filePath: string): void {
+export function secureWipeFile(filePath: string): void {
   let fd: number | undefined;
 
   try {
