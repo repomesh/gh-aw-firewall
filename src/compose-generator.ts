@@ -126,9 +126,33 @@ export function generateDockerCompose(
       '/host/lib64',
       '/host/opt',
     ]);
+
+    // On split-fs ARC/DinD, the Docker daemon cannot see the runner's
+    // filesystem paths. Filter out bind mounts the daemon can't resolve:
+    //  - Source under workDir (runner's unshared /tmp/awf-*): daemon can't see it
+    //  - Source under effectiveHome with target under /host: sysroot volume provides these
+    //  - Sysroot-shadowed targets: system binaries already in the sysroot volume
+    // Keep: /tmp:/tmp (daemon has its own), /dev/null overlays, /dev and /sys
+    //       (kernel VFS), workspace mounts (ARC shares workspace with daemon).
+    const workDirPrefix = config.workDir;
+    const hostHomeMountPrefix = `/host${effectiveHome}`;
+
     const filteredVolumes = agentVolumes.filter(volume => {
-      const target = volume.split(':')[1];
-      return !sysrootShadowedTargets.has(target);
+      const parts = volume.split(':');
+      if (parts.length < 2) return true; // Keep malformed entries unchanged
+      const source = parts[0];
+      const target = parts[1];
+
+      // Drop sysroot-shadowed targets (system binaries provided by volume)
+      if (sysrootShadowedTargets.has(target)) return false;
+
+      // Drop mounts sourced from AWF workDir (runner's unshared /tmp/awf-*)
+      if (source.startsWith(workDirPrefix)) return false;
+
+      // Drop home directory mounts targeting /host/home/... — sysroot provides them
+      if (source.startsWith(effectiveHome) && target.startsWith(hostHomeMountPrefix)) return false;
+
+      return true;
     });
     agentVolumes.length = 0;
     agentVolumes.push(...filteredVolumes);
