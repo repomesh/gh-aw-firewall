@@ -232,7 +232,7 @@ function prepareChrootHomeMounts(config: WrapperConfig): void {
   const hostHomeMountSourceDirs = [
     '.copilot', '.cache', '.config', '.local',
     '.anthropic', '.claude', '.cargo', '.rustup', '.npm', '.nvm',
-    ...(config.geminiApiKey ? ['.gemini'] : []),
+    ...(config.geminiApiKey || config.googleApiKey ? ['.gemini'] : []),
   ];
   for (const dir of hostHomeMountSourceDirs) {
     const dirPath = path.join(effectiveHome, dir);
@@ -240,6 +240,11 @@ function prepareChrootHomeMounts(config: WrapperConfig): void {
       fs.mkdirSync(dirPath, { recursive: true });
       fs.chownSync(dirPath, uid, gid);
       logger.debug(`Created host home subdirectory: ${dirPath} (${uid}:${gid})`);
+    } else if (dir === '.gemini') {
+      // Repair existing .gemini ownership for Gemini/Vertex runs where prior
+      // root-owned bind mounts can break atomic writes in the CLI.
+      fs.chownSync(dirPath, uid, gid);
+      logger.debug(`Fixed host home subdirectory ownership: ${dirPath} (${uid}:${gid})`);
     }
   }
 
