@@ -16,6 +16,7 @@ const {
   buildTokenUsageRecord,
   incrementTokenMetrics,
   diag,
+  auditTrack,
 } = require('./token-persistence');
 const { warnCacheReadRollupMismatch, mergeBudgetFields } = require('./token-tracker-shared');
 
@@ -26,14 +27,19 @@ const { warnCacheReadRollupMismatch, mergeBudgetFields } = require('./token-trac
  *   - messages: Array of decoded text frame payloads (strings)
  *   - consumed: Number of bytes consumed from the buffer
  *
- * Only handles non-fragmented text frames (FIN=1, opcode=1).
- * Other frame types (binary, ping, pong, close, continuation) are consumed
- * but their payloads are not returned.
+ * Handles both unfragmented text frames (FIN=1, opcode=1) and fragmented
+ * messages (FIN=0 initial frame + continuation frames with opcode=0,
+ * terminated by a FIN=1 continuation frame). The `fragments` array is
+ * carried across calls to support fragmentation that spans data events.
+ *
+ * Other frame types (binary, ping, pong, close) are consumed but their
+ * payloads are not returned.
  *
  * @param {Buffer} buf - Buffer containing WebSocket frame data
+ * @param {Buffer[]} [fragments] - Mutable array for accumulating fragment payloads across calls
  * @returns {{ messages: string[], consumed: number }}
  */
-function parseWebSocketFrames(buf) {
+function parseWebSocketFrames(buf, fragments) {
   const messages = [];
   let pos = 0;
 
@@ -64,22 +70,42 @@ function parseWebSocketFrames(buf) {
     const frameEnd = pos + headerSize + payloadLength;
     if (frameEnd > buf.length) break;
 
-    // Extract text frames (opcode 1) with FIN set
+    // Extract payload from the frame
+    const payloadStart = pos + headerSize;
+    let payload;
+    if (masked) {
+      const maskKeyStart = payloadStart - 4;
+      const maskingKey = buf.slice(maskKeyStart, maskKeyStart + 4);
+      const maskedPayload = buf.slice(payloadStart, frameEnd);
+      payload = Buffer.allocUnsafe(payloadLength);
+      for (let i = 0; i < payloadLength; i++) {
+        payload[i] = maskedPayload[i] ^ maskingKey[i % 4];
+      }
+    } else {
+      payload = buf.slice(payloadStart, frameEnd);
+    }
+
     if (opcode === 1 && fin) {
-      const payloadStart = pos + headerSize;
-      if (masked) {
-        const maskKeyStart = payloadStart - 4;
-        const maskingKey = buf.slice(maskKeyStart, maskKeyStart + 4);
-        const maskedPayload = buf.slice(payloadStart, frameEnd);
-        const unmasked = Buffer.allocUnsafe(payloadLength);
-        for (let i = 0; i < payloadLength; i++) {
-          unmasked[i] = maskedPayload[i] ^ maskingKey[i % 4];
+      // Unfragmented text frame — complete message in a single frame
+      messages.push(payload.toString('utf8'));
+    } else if (opcode === 1 && !fin) {
+      // Start of a fragmented text message (FIN=0, opcode=text)
+      if (fragments) {
+        fragments.length = 0; // reset any prior incomplete fragment
+        fragments.push(payload);
+      }
+    } else if (opcode === 0) {
+      // Continuation frame
+      if (fragments && fragments.length > 0) {
+        fragments.push(payload);
+        if (fin) {
+          // Final continuation frame — reassemble the full message
+          messages.push(Buffer.concat(fragments).toString('utf8'));
+          fragments.length = 0;
         }
-        messages.push(unmasked.toString('utf8'));
-      } else {
-        messages.push(buf.slice(payloadStart, frameEnd).toString('utf8'));
       }
     }
+    // Other opcodes (binary=2, close=8, ping=9, pong=10) are silently consumed
 
     pos = frameEnd;
   }
@@ -110,6 +136,7 @@ function parseWebSocketFrames(buf) {
 function trackWebSocketTokenUsage(upstreamSocket, opts) {
   const { requestId, provider, path: reqPath, startTime, metrics: metricsRef, onUsage } = opts;
 
+  auditTrack('WS_TRACK_START', { rid: requestId, provider, path: reqPath });
   logRequest('debug', 'ws_token_track_start', {
     request_id: requestId,
     provider,
@@ -128,6 +155,9 @@ function trackWebSocketTokenUsage(upstreamSocket, opts) {
   let textMessageCount = 0;
   let observedCacheReadTokens = 0;
 
+  // Accumulates payloads from fragmented WebSocket text messages across frames
+  const fragments = [];
+
   // Max buffer to prevent unbounded memory growth (1 MB)
   const MAX_WS_BUFFER = 1 * 1024 * 1024;
 
@@ -138,6 +168,7 @@ function trackWebSocketTokenUsage(upstreamSocket, opts) {
     // Safety: drop buffer if it grows too large (malformed frames)
     if (buffer.length > MAX_WS_BUFFER) {
       buffer = Buffer.alloc(0);
+      fragments.length = 0; // clear in-progress fragment state
       httpHeaderParsed = true; // skip header parsing
       return;
     }
@@ -152,7 +183,7 @@ function trackWebSocketTokenUsage(upstreamSocket, opts) {
     }
 
     // Parse any complete WebSocket frames
-    const { messages, consumed } = parseWebSocketFrames(buffer);
+    const { messages, consumed } = parseWebSocketFrames(buffer, fragments);
     if (consumed > 0) {
       buffer = buffer.slice(consumed);
     }
@@ -184,19 +215,22 @@ function trackWebSocketTokenUsage(upstreamSocket, opts) {
     if (finalized) return;
     finalized = true;
 
+    const hasUsage = Object.keys(streamingUsage).length > 0;
+    auditTrack('WS_TRACK_END', { rid: requestId, result: hasUsage ? 'ok' : 'no_usage', frames: frameCount, msgs: textMessageCount, bytes: totalBytes });
+
     logRequest('debug', 'ws_token_track_end', {
       request_id: requestId,
       provider,
       total_bytes: totalBytes,
       frame_count: frameCount,
       text_message_count: textMessageCount,
-      has_usage: Object.keys(streamingUsage).length > 0,
+      has_usage: hasUsage,
       usage_keys: Object.keys(streamingUsage),
       model: streamingModel,
     });
-    diag('WS_TRACK_END', { request_id: requestId, provider, total_bytes: totalBytes, frame_count: frameCount, text_message_count: textMessageCount, has_usage: Object.keys(streamingUsage).length > 0, usage_keys: Object.keys(streamingUsage), model: streamingModel });
+    diag('WS_TRACK_END', { request_id: requestId, provider, total_bytes: totalBytes, frame_count: frameCount, text_message_count: textMessageCount, has_usage: hasUsage, usage_keys: Object.keys(streamingUsage), model: streamingModel });
 
-    if (Object.keys(streamingUsage).length === 0) return;
+    if (!hasUsage) return;
 
     const duration = Date.now() - startTime;
     const normalized = normalizeUsage(streamingUsage);
