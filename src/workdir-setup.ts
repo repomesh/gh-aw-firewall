@@ -15,9 +15,36 @@ interface EnsureDirectoryOptions {
 
 function ensureDirectory(dirPath: string, options: EnsureDirectoryOptions = {}): boolean {
   const { mode, onCreate, onExists, onAfterEnsure } = options;
-  const created = Boolean(
-    fs.mkdirSync(dirPath, mode === undefined ? { recursive: true } : { recursive: true, mode })
-  );
+  let created: boolean;
+  try {
+    created = Boolean(
+      fs.mkdirSync(dirPath, mode === undefined ? { recursive: true } : { recursive: true, mode })
+    );
+  } catch (error: unknown) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'EACCES') {
+      const uid = process.getuid?.() ?? '?';
+      // Identify the blocking ancestor for actionable diagnostics.
+      // Default to the nearest existing ancestor (more actionable than a path that
+      // does not exist), and confirm with a W_OK|X_OK access check.
+      let blocker: string | null = null;
+      let current = path.resolve(dirPath);
+      while (current !== path.dirname(current)) {
+        if (fs.existsSync(current)) {
+          blocker = current;
+          try { fs.accessSync(current, fs.constants.W_OK | fs.constants.X_OK); } catch { /* confirmed blocker */ }
+          break;
+        }
+        current = path.dirname(current);
+      }
+      throw new Error(
+        `EACCES: cannot create directory ${dirPath} (running as uid=${uid}).\n` +
+        `  Blocked by: ${blocker ?? dirPath}\n` +
+        `  This is typically caused by a previous AWF run leaving root-owned directories.\n` +
+        `  The orchestrator must clean up stale directories before invoking AWF.`
+      );
+    }
+    throw error;
+  }
 
   const lstat = fs.lstatSync(dirPath);
   if (lstat.isSymbolicLink()) {
