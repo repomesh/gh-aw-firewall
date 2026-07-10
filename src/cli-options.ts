@@ -169,6 +169,12 @@ program
     '                                       Useful for split runner/daemon filesystems (e.g. ARC DinD).\n' +
     '                                       Example: /host'
   )
+  .option(
+    '--container-runtime <runtime>',
+    'Container runtime for the agent container (e.g. "gvisor" for gVisor sandboxing).\n' +
+    '                                       AWF translates friendly names to Docker runtime identifiers\n' +
+    '                                       (gvisor → runsc). Unknown values are passed through as-is.'
+  )
 
   // -- Container Configuration --
   .option(

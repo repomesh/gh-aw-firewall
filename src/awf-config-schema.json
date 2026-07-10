@@ -619,6 +619,11 @@
             "pattern": "^/[^:]+:/[^:]+(:(ro|rw))?$"
           },
           "description": "Custom volume mounts for the agent container. Format: \"/host_path:/container_path[:ro|rw]\" (both paths must be absolute). In chroot mode, container paths are automatically prefixed with /host."
+        },
+        "containerRuntime": {
+          "type": "string",
+          "enum": ["gvisor"],
+          "description": "Container runtime for the agent container. Set to \"gvisor\" to run the agent under gVisor's runsc runtime for additional sandboxing. Only the agent container uses the custom runtime; infrastructure containers (squid-proxy, api-proxy) always use the default runc runtime. When set, AWF automatically injects extra_hosts entries for compose-internal services to work around DNS resolution issues with non-default runtimes. Requires gVisor (runsc) to be installed and registered with Docker on the host."
         }
       }
     },

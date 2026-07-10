@@ -531,4 +531,94 @@ describe('agent service', () => {
       }
     });
   });
+
+  describe('container runtime', () => {
+    it('should not set runtime when containerRuntime is not specified', () => {
+      const result = generateDockerCompose(mockConfig, mockNetworkConfig);
+      const agent = result.services.agent as any;
+
+      expect(agent.runtime).toBeUndefined();
+    });
+
+    it('should set runtime when containerRuntime is specified', () => {
+      const configWithRuntime = {
+        ...mockConfig,
+        containerRuntime: 'gvisor',
+      };
+      const result = generateDockerCompose(configWithRuntime, mockNetworkConfig);
+      const agent = result.services.agent as any;
+
+      expect(agent.runtime).toBe('runsc');
+    });
+
+    it('should only set runtime on agent, not on squid', () => {
+      const configWithRuntime = {
+        ...mockConfig,
+        containerRuntime: 'gvisor',
+      };
+      const result = generateDockerCompose(configWithRuntime, mockNetworkConfig);
+
+      expect((result.services.agent as any).runtime).toBe('runsc');
+      expect((result.services['squid-proxy'] as any).runtime).toBeUndefined();
+    });
+
+    it('should inject compose-internal service hosts when containerRuntime is set', () => {
+      const configWithRuntime = {
+        ...mockConfig,
+        containerRuntime: 'gvisor',
+        enableApiProxy: true,
+      };
+      const networkWithProxy = {
+        ...mockNetworkConfig,
+        proxyIp: '172.30.0.30',
+      };
+      const result = generateDockerCompose(configWithRuntime, networkWithProxy);
+      const agent = result.services.agent as any;
+
+      expect(agent.extra_hosts).toEqual({
+        'squid-proxy': mockNetworkConfig.squidIp,
+        'api-proxy': '172.30.0.30',
+      });
+    });
+
+    it('should not inject api-proxy host when proxyIp is absent', () => {
+      const configWithRuntime = {
+        ...mockConfig,
+        containerRuntime: 'gvisor',
+      };
+      const result = generateDockerCompose(configWithRuntime, mockNetworkConfig);
+      const agent = result.services.agent as any;
+
+      expect(agent.extra_hosts['squid-proxy']).toBe(mockNetworkConfig.squidIp);
+      expect(agent.extra_hosts['api-proxy']).toBeUndefined();
+    });
+
+    it('should pass through unknown runtime names unchanged', () => {
+      const configWithRuntime = {
+        ...mockConfig,
+        containerRuntime: 'kata',
+      };
+      const result = generateDockerCompose(configWithRuntime, mockNetworkConfig);
+      const agent = result.services.agent as any;
+
+      expect(agent.runtime).toBe('kata');
+    });
+
+    it('should not inject compose-internal hosts for runtimes that do not need static DNS', () => {
+      const configWithRuntime = {
+        ...mockConfig,
+        containerRuntime: 'kata',
+        enableApiProxy: true,
+      };
+      const networkWithProxy = {
+        ...mockNetworkConfig,
+        proxyIp: '172.30.0.30',
+      };
+      const result = generateDockerCompose(configWithRuntime, networkWithProxy);
+      const agent = result.services.agent as any;
+
+      expect(agent.extra_hosts?.['squid-proxy']).toBeUndefined();
+      expect(agent.extra_hosts?.['api-proxy']).toBeUndefined();
+    });
+  });
 });

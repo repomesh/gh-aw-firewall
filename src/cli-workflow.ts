@@ -2,9 +2,22 @@ import { WrapperConfig } from './types';
 import { HostAccessConfig, CliProxyHostConfig } from './host-iptables';
 import { DEFAULT_DNS_SERVERS } from './dns-resolver';
 import { parseDifcProxyHost } from './docker-manager';
-import { CLI_PROXY_IP, DOH_PROXY_IP } from './host-iptables-shared';
-import { TOPOLOGY_NETWORK_NAME } from './topology';
+import { CLI_PROXY_IP, DOH_PROXY_IP, SQUID_IP, API_PROXY_IP } from './host-iptables-shared';
+import { TOPOLOGY_NETWORK_NAME, getTopologyContainerIps, patchComposeWithTopologyHosts } from './topology';
+import { runtimeNeedsStaticDns } from './container-runtime';
 
+/**
+ * Dependencies injected into the main workflow.
+ *
+ * These are implemented by `docker-manager.ts` for the Docker Compose backend.
+ * A future microVM backend (e.g. Docker sbx) would provide alternative
+ * implementations that:
+ * - `writeConfigs` — generate compose for infrastructure only (no agent service)
+ * - `startContainers` — start Squid + api-proxy via compose, then launch agent
+ *   in a microVM with the sbx proxy chaining through host-side Squid/api-proxy
+ * - `runAgentCommand` — `sbx run` instead of `docker logs -f` + `docker wait`
+ * - Cleanup — `sbx rm` + `docker compose down` for infrastructure
+ */
 interface WorkflowDependencies {
   ensureFirewallNetwork: () => Promise<{ squidIp: string; agentIp: string; proxyIp: string; subnet: string }>;
   setupHostIptables: (squidIp: string, port: number, dnsServers: string[], apiProxyIp?: string, dohProxyIp?: string, hostAccess?: HostAccessConfig, cliProxyConfig?: CliProxyHostConfig) => Promise<void>;
@@ -119,6 +132,25 @@ export async function runMainWorkflow(
       ? async () => {
           logger.info(`Attaching ${config.topologyAttach!.length} trusted container(s) to the internal network...`);
           await dependencies.connectTopologyContainers!(TOPOLOGY_NETWORK_NAME, config.topologyAttach!);
+
+          // When the agent uses a runtime whose network stack cannot reach
+          // Docker's embedded DNS (e.g. gVisor), inject /etc/hosts entries for
+          // topology peers and compose-internal services so hostname resolution
+          // works without DNS.
+          if (runtimeNeedsStaticDns(config.containerRuntime)) {
+            const peerIps = await getTopologyContainerIps(TOPOLOGY_NETWORK_NAME, config.topologyAttach!);
+
+            // Include compose-internal services whose hostnames the agent may
+            // need to resolve — normally handled by Docker DNS at 127.0.0.11.
+            peerIps.set('squid-proxy', SQUID_IP);
+            if (config.enableApiProxy) {
+              peerIps.set('api-proxy', API_PROXY_IP);
+            }
+
+            if (peerIps.size > 0) {
+              patchComposeWithTopologyHosts(config.workDir, peerIps);
+            }
+          }
         }
       : undefined;
 

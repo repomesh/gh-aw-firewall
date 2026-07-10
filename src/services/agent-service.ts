@@ -6,6 +6,7 @@ import {
 } from '../constants';
 import { ACT_PRESET_BASE_IMAGE, getSafeHostUid, getSafeHostGid } from '../host-identity';
 import { buildRuntimeImageRef } from '../image-tag';
+import { resolveDockerRuntime, runtimeNeedsStaticDns } from '../container-runtime';
 import { logger } from '../logger';
 import { WrapperConfig } from '../types';
 import { NetworkConfig, ImageBuildConfig } from './squid-service';
@@ -154,11 +155,36 @@ export function buildAgentService(params: AgentServiceParams): any {
 
   // Enable host.docker.internal for agent when --enable-host-access is set
   if (config.enableHostAccess) {
-    agentService.extra_hosts = ['host.docker.internal:host-gateway'];
+    agentService.extra_hosts = { 'host.docker.internal': 'host-gateway' };
     environment.AWF_ENABLE_HOST_ACCESS = '1';
   }
 
   Object.assign(agentService, resolveAgentImageConfig(config, imageConfig));
+
+  // Set container runtime if specified (e.g., "gvisor" → Docker runtime "runsc")
+  if (config.containerRuntime) {
+    const dockerRuntime = resolveDockerRuntime(config.containerRuntime);
+    if (dockerRuntime) {
+      agentService.runtime = dockerRuntime;
+      logger.debug(`Set agent container runtime to: ${dockerRuntime} (from config: ${config.containerRuntime})`);
+    }
+
+    // Some runtimes (e.g. gVisor) have a userspace netstack with an isolated
+    // sandbox loopback that cannot reach Docker's embedded DNS at 127.0.0.11.
+    // For these runtimes, inject static /etc/hosts entries for all
+    // compose-internal services the agent may need to reach by hostname.
+    // See: https://github.com/google/gvisor/issues/7469
+    if (runtimeNeedsStaticDns(config.containerRuntime)) {
+      if (!agentService.extra_hosts) {
+        agentService.extra_hosts = {};
+      }
+      agentService.extra_hosts['squid-proxy'] = networkConfig.squidIp;
+      if (networkConfig.proxyIp) {
+        agentService.extra_hosts['api-proxy'] = networkConfig.proxyIp;
+      }
+      logger.debug('Injected compose-internal service hosts for static DNS compatibility');
+    }
+  }
 
   return agentService;
 }

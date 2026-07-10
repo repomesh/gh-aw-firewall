@@ -158,12 +158,12 @@ interface DockerService {
   /**
    * Extra hosts to add to /etc/hosts in the container
    *
-   * Array of host:ip mappings. Used to enable host.docker.internal
-   * on Linux where it's not available by default.
+   * Mapping of hostname to IP/alias. Docker Compose V2 mapping format.
+   * Used to enable host.docker.internal on Linux and for gVisor DNS compat.
    *
-   * @example ['host.docker.internal:host-gateway']
+   * @example { 'host.docker.internal': 'host-gateway' }
    */
-  extra_hosts?: string[];
+  extra_hosts?: Record<string, string>;
 
   /**
    * Volume mount specifications
@@ -378,6 +378,18 @@ interface DockerService {
    * @example ['/tmp/awf-123:rw,noexec,nosuid,size=1m']
    */
   tmpfs?: string[];
+
+  /**
+   * OCI container runtime to use for this service
+   *
+   * When set, Docker Compose passes `--runtime=<value>` to the container engine.
+   * Requires the named runtime to be registered in the Docker daemon configuration
+   * (e.g., via `runsc install` for gVisor or kata-runtime for Kata Containers).
+   *
+   * @example 'runsc'   // gVisor
+   * @example 'kata'    // Kata Containers
+   */
+  runtime?: string;
 }
 
 /**

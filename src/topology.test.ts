@@ -1,8 +1,14 @@
 import execa from 'execa';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import * as yaml from 'js-yaml';
 import {
   TOPOLOGY_NETWORK_NAME,
   assertTopologySupported,
   connectTopologyContainers,
+  getTopologyContainerIps,
+  patchComposeWithTopologyHosts,
 } from './topology';
 
 jest.mock('execa');
@@ -145,6 +151,115 @@ describe('topology', () => {
       await expect(
         connectTopologyContainers(TOPOLOGY_NETWORK_NAME, ['ghost']),
       ).rejects.toThrow(/exited with code 1/);
+    });
+  });
+
+  describe('getTopologyContainerIps', () => {
+    it('returns IP addresses for connected containers', async () => {
+      mockedExeca.mockResolvedValueOnce({ exitCode: 0, stdout: '172.30.0.40' } as any);
+      mockedExeca.mockResolvedValueOnce({ exitCode: 0, stdout: '172.30.0.41' } as any);
+      const log = { info: jest.fn(), warn: jest.fn() };
+
+      const ips = await getTopologyContainerIps('awf-net', ['mcp-gateway', 'difc-proxy'], log);
+
+      expect(ips.size).toBe(2);
+      expect(ips.get('mcp-gateway')).toBe('172.30.0.40');
+      expect(ips.get('difc-proxy')).toBe('172.30.0.41');
+      expect(log.info).toHaveBeenCalledWith(expect.stringContaining('172.30.0.40'));
+    });
+
+    it('warns and skips containers with no IP', async () => {
+      mockedExeca.mockResolvedValueOnce({ exitCode: 0, stdout: '' } as any);
+      const log = { info: jest.fn(), warn: jest.fn() };
+
+      const ips = await getTopologyContainerIps('awf-net', ['missing'], log);
+
+      expect(ips.size).toBe(0);
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('Could not determine IP'));
+    });
+
+    it('warns and skips containers when docker inspect fails', async () => {
+      mockedExeca.mockRejectedValueOnce(new Error('docker not found'));
+      const log = { info: jest.fn(), warn: jest.fn() };
+
+      const ips = await getTopologyContainerIps('awf-net', ['broken'], log);
+
+      expect(ips.size).toBe(0);
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to inspect'));
+    });
+  });
+
+  describe('patchComposeWithTopologyHosts', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'topology-test-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('adds extra_hosts entries and patches chroot hosts file', () => {
+      // Create a hosts file that the compose volume references
+      const hostsDir = path.join(tmpDir, 'chroot-abc');
+      fs.mkdirSync(hostsDir);
+      const hostsFile = path.join(hostsDir, 'hosts');
+      fs.writeFileSync(hostsFile, '127.0.0.1 localhost\n');
+
+      const compose = {
+        services: {
+          agent: {
+            container_name: 'awf-agent',
+            networks: { 'awf-net': { ipv4_address: '172.30.0.20' } },
+            volumes: [`${hostsFile}:/host/etc/hosts:ro`],
+          },
+        },
+      };
+      fs.writeFileSync(path.join(tmpDir, 'docker-compose.yml'), yaml.dump(compose));
+      const log = { info: jest.fn(), warn: jest.fn() };
+
+      const peerIps = new Map([['mcp-gateway', '172.30.0.40']]);
+      patchComposeWithTopologyHosts(tmpDir, peerIps, log);
+
+      const patched = yaml.load(fs.readFileSync(path.join(tmpDir, 'docker-compose.yml'), 'utf8')) as any;
+      expect(patched.services.agent.extra_hosts).toEqual({ 'mcp-gateway': '172.30.0.40' });
+      // Verify hosts file was also patched
+      const hostsContent = fs.readFileSync(hostsFile, 'utf8');
+      expect(hostsContent).toContain('172.30.0.40\tmcp-gateway');
+      expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Appended'));
+    });
+
+    it('appends to existing extra_hosts without overwriting', () => {
+      const compose = {
+        services: {
+          agent: {
+            container_name: 'awf-agent',
+            extra_hosts: { 'host.docker.internal': 'host-gateway' },
+          },
+        },
+      };
+      fs.writeFileSync(path.join(tmpDir, 'docker-compose.yml'), yaml.dump(compose));
+      const log = { info: jest.fn(), warn: jest.fn() };
+
+      const peerIps = new Map([['mcp-gateway', '172.30.0.40']]);
+      patchComposeWithTopologyHosts(tmpDir, peerIps, log);
+
+      const patched = yaml.load(fs.readFileSync(path.join(tmpDir, 'docker-compose.yml'), 'utf8')) as any;
+      expect(patched.services.agent.extra_hosts).toEqual({
+        'host.docker.internal': 'host-gateway',
+        'mcp-gateway': '172.30.0.40',
+      });
+    });
+
+    it('warns and returns when agent service is not found', () => {
+      const compose = { services: { squid: {} } };
+      fs.writeFileSync(path.join(tmpDir, 'docker-compose.yml'), yaml.dump(compose));
+      const log = { info: jest.fn(), warn: jest.fn() };
+
+      patchComposeWithTopologyHosts(tmpDir, new Map([['x', '1.2.3.4']]), log);
+
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('Could not find agent service'));
     });
   });
 });
