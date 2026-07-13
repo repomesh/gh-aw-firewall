@@ -39,6 +39,10 @@ safe-outputs:
     run-failure: "🐳🔮 [{workflow_name}]({run_url}) reports {status}. Docker sbx + Codex compatibility issue detected."
 timeout-minutes: 15
 sandbox:
+  agent:
+    id: awf
+    runtime: docker-sbx
+    sudo: true
   mcp:
     version: latest
 strict: false
